@@ -28,57 +28,31 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import os
-import shutil
+import math
 import tempfile
+import shutil
+
 import unittest
 
-import oamap.source.shelve
-from oamap.proxy import tojson
 from oamap.schema import *
+from oamap.backend.numpyfile import *
 
-class TestShelve(unittest.TestCase):
+class TestBackendNumpyfile(unittest.TestCase):
     def runTest(self):
         pass
 
-    def test_simple(self):
+    def test_database(self):
+        tmpdir = tempfile.mkdtemp()
         try:
-            tmpdir = tempfile.mkdtemp()
-            d = oamap.source.shelve.open(os.path.join(tmpdir, "database"))
+            db = NumpyFileDatabase(tmpdir)
+            db.fromdata("one", List(Record({"x": "int32", "y": "float64"})), [{"x": 1, "y": 1.1}, {"x": 2, "y": 2.2}, {"x": 3, "y": 3.3}], [{"x": 4, "y": 4.4}, {"x": 5, "y": 5.5}, {"x": 6, "y": 6.6}])
 
-            d["one"] = 1
-            self.assertEqual(d.schema("one"), Primitive("uint8"))
-            self.assertEqual(d["one"], 1)
+            db.data.two = db.data.one.define("z", lambda obj: obj.x + obj.y)
 
-            d["two"] = 3.14
-            self.assertEqual(d.schema("two"), Primitive("f8"))
-            self.assertEqual(d["two"], 3.14)
+            self.assertEqual([(obj.x, obj.y, obj.z) for obj in db.data.two], [(1, 1.1, 2.1), (2, 2.2, 4.2), (3, 3.3, 6.3), (4, 4.4, 8.4), (5, 5.5, 10.5), (6, 6.6, 12.6)])
 
-            d["three"] = [1, 2, 3, 4, 5]
-            self.assertEqual(d.schema("three"), List(Primitive("uint8")))
-            self.assertEqual(d["three"], [1, 2, 3, 4, 5])
-
-            d["four"] = u"hello"
-            self.assertEqual(d.schema("four"), List(Primitive("uint8"), name="UTF8String"))
-            self.assertEqual(d["four"], u"hello")
-
-            d["five"] = ["one", b"two", u"three"]
-            self.assertEqual(d.schema("five"), List(List(Primitive("uint8"), name="UTF8String")))
-            self.assertEqual(d["five"], [u"one", u"two", u"three"])
+            del db.data.one
+            del db.data.two
 
         finally:
-            d.close()
-            shutil.rmtree(tmpdir)
-
-    def test_partitioned(self):
-        try:
-            tmpdir = tempfile.mkdtemp()
-            d = oamap.source.shelve.open(os.path.join(tmpdir, "database"))
-
-            d.fromdata("test", range(100), schema=List(Primitive("u1")), partitionlimit=lambda entries, arrayitems, arraybytes: entries <= 30)
-
-            self.assertEqual(list(d["test"]), list(range(100)))
-
-        finally:
-            d.close()
             shutil.rmtree(tmpdir)

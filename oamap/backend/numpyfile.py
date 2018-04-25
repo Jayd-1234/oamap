@@ -28,55 +28,32 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-"""Substitutions for parts of fastparquet that we need to do differently.
-
-This file (only one in the _fastparquet directory) is under OAMap's license.
-"""
-
 import os
 
 import numpy
 
-from oamap.util import OrderedDict
+import oamap.dataset
+import oamap.database
 
-try:
-    import thriftpy
-    import thriftpy.protocol
-except ImportError:
-    thriftpy = None
-    parquet_thrift = None
-else:
-    THRIFT_FILE = os.path.join(os.path.dirname(__file__), "parquet.thrift")
-    parquet_thrift = thriftpy.load(THRIFT_FILE, module_name="parquet_thrift")
+class NumpyFileBackend(oamap.database.FilesystemBackend):
+    def __init__(self, directory):
+        super(NumpyFileBackend, self).__init__(directory, arraysuffix=".npy")
 
-def unpack_byte_array(array, count):
-    data = numpy.empty(len(array) - 4*count, numpy.uint8)
-    size = numpy.empty(count, numpy.int32)
+    def instantiate(self, partitionid):
+        return NumpyArrays(lambda name: self.fullname(partitionid, name, create=False),
+                           lambda name: self.fullname(partitionid, name, create=True))
 
-    i = 0
-    datai = 0
-    sizei = 0
-    while sizei < count:
-        if i + 4 > len(array):
-            raise RuntimeError("ran out of input")
-        itemlen = array[i] + (array[i + 1] << 8) + (array[i + 2] << 16) + (array[i + 3] << 24)
-        i += 4
+class NumpyArrays(object):
+    def __init__(self, loadname, storename):
+        self._loadname = loadname
+        self._storename = storename
 
-        if i + itemlen > len(array):
-            raise RuntimeError("ran out of input")
-        data[datai : datai + itemlen] = array[i : i + itemlen]
-        size[sizei] = itemlen
+    def __getitem__(self, name):
+        return numpy.load(self._loadname(name))
 
-        i += itemlen
-        datai += itemlen
-        sizei += 1
+    def __setitem__(self, name, value):
+        numpy.save(self._storename(name), value)
 
-    return data, size
-
-try:
-    import numba
-except ImportError:
-    pass
-else:
-    njit = numba.jit(nopython=True, nogil=True)
-    unpack_byte_array = njit(unpack_byte_array)
+class NumpyFileDatabase(oamap.database.FilesystemDatabase):
+    def __init__(self, directory, namespace=""):
+        super(NumpyFileDatabase, self).__init__(directory, backends={namespace: NumpyFileBackend(directory)}, namespace=namespace)
